@@ -1,0 +1,9 @@
+# Ignorar credenciais do Firebase
+firebase_admin_sdk.json
+
+# Ignorar arquivos pycache
+__pycache__/
+*.pyc
+
+# Ignorar arquivos temporários do sistema
+.DS_Store
