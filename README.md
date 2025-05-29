@@ -1,20 +1,28 @@
-# 🤝 Encontro Ideal
+# Encontro Ideal - Agenda para famílias
 
-O **Encontro Ideal** é um app simples e acolhedor feito com [Streamlit]([https://streamlit.io](https://encontroideal.streamlit.app/), que ajuda grupos (família, amigos ou equipe) a decidirem **qual o melhor dia e horário** para se encontrarem, com base na disponibilidade de cada pessoa. 💕
+Este projeto é um app feito com Streamlit que permite que membros de uma família marquem seus horários disponíveis para encontros. Os dados são armazenados no Firebase Firestore, garantindo que várias pessoas em dispositivos diferentes possam participar usando um código único da família.
 
----
+## Funcionalidades
 
-## 📌 Como funciona
+- Entrada de código da família para carregar dados privados  
+- Seleção de datas no mês atual e próximo mês  
+- Marcação de horários disponíveis por usuário  
+- Armazenamento em banco Firestore  
+- Cálculo automático dos horários em comum para a família
 
-1. Cada pessoa preenche seu nome.
-2. Marca os dias e horários em que está disponível.
-3. O sistema mostra os **horários em comum** entre todos.
+## Como usar
 
-Tudo de forma rápida, visual e sem precisar digitar nada!
+### Pré-requisitos
 
----
+- Conta Google para criar projeto Firebase e banco Firestore  
+- Configurar as credenciais Firebase conforme descrito abaixo  
+- Ter Python 3.7+ instalado
 
-## 📲 Como usar
+### Instalação
 
-Você pode acessar o app online via [Streamlit Cloud](https://streamlit.io/cloud) (link será gerado após o deploy):
+1. Clone este repositório  
+2. Crie e ative um ambiente virtual (recomendado)  
+3. Instale as dependências:
 
+```bash
+pip install -r requirements.txt
