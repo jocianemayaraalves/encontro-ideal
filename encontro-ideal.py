@@ -1,61 +1,82 @@
 import streamlit as st
+import json
+import firebase_admin
+from firebase_admin import credentials, firestore
+from datetime import datetime
+import pandas as pd
 
-st.set_page_config(page_title="Encontro Ideal", page_icon="🤝", layout="centered")
-st.title("🤝 Encontro Ideal - Ache o melhor horário em família!")
-st.markdown("Marque os dias e horários que você está disponível:")
+# Inicializar Firebase com credenciais do Streamlit Secrets
+firebase_cred_dict = json.loads(st.secrets["FIREBASE_CREDENTIALS"])
+if not firebase_admin._apps:
+    cred = credentials.Certificate(firebase_cred_dict)
+    firebase_admin.initialize_app(cred)
 
-dias_semana = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
-horarios_dia = ["10h", "14h", "16h", "18h", "19h", "20h"]
+db = firestore.client()
 
-# Inicializa estado
-if "disponibilidade" not in st.session_state:
-    st.session_state.disponibilidade = {}
+st.set_page_config(page_title="Encontro em Família", layout="centered")
+st.title("☕ Agenda do Encontro em Família")
 
-# Nome da pessoa
-nome = st.text_input("👤 Seu nome:")
+with st.form("formulario"):
+    nome = st.text_input("Seu nome")
+    codigo_familia = st.text_input("Código da família")
 
-# Grade de horários
-st.markdown("### 📅 Selecione seus horários disponíveis:")
+    st.markdown("**Escolha os dias e horários que você está disponível nesta semana:**")
+    dias = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+    horarios = ["08h", "10h", "14h", "16h", "18h", "20h"]
 
-marcados = []
+    disponibilidade = {}
+    for dia in dias:
+        colunas = st.columns(len(horarios))
+        disponibilidade[dia] = []
+        for i, hora in enumerate(horarios):
+            checked = colunas[i].checkbox(f"{hora}", key=f"{dia}-{hora}")
+            if checked:
+                disponibilidade[dia].append(hora)
 
-for dia in dias_semana:
-    st.markdown(f"**{dia.capitalize()}**")
-    cols = st.columns(len(horarios_dia))
-    for i, hora in enumerate(horarios_dia):
-        checked = cols[i].checkbox(hora, key=f"{nome}_{dia}_{hora}")
-        if checked:
-            marcados.append(f"{dia}-{hora}")
+    submitted = st.form_submit_button("Salvar minha disponibilidade")
 
-# Botão para salvar
-if st.button("💾 Salvar minha disponibilidade"):
-    if nome.strip() == "":
-        st.error("Por favor, insira seu nome antes de salvar.")
-    elif not marcados:
-        st.warning("Você não marcou nenhum horário!")
+    if submitted:
+        if not nome or not codigo_familia:
+            st.warning("Por favor, preencha seu nome e o código da família.")
+        else:
+            doc_ref = db.collection("familias").document(codigo_familia).collection("respostas").document(nome)
+            doc_ref.set({
+                "nome": nome,
+                "codigo_familia": codigo_familia,
+                "disponibilidade": disponibilidade,
+                "timestamp": datetime.now()
+            })
+            st.success("Disponibilidade salva com sucesso! 🎉")
+
+st.markdown("---")
+st.header("🔍 Melhor horário para a família")
+codigo_busca = st.text_input("Digite o código da família para ver o melhor horário")
+
+if st.button("Calcular melhor horário"):
+    if not codigo_busca:
+        st.warning("Digite um código de família.")
     else:
-        st.session_state.disponibilidade[nome.strip()] = set(marcados)
-        st.success("Disponibilidade salva com sucesso! ✅")
+        respostas = db.collection("familias").document(codigo_busca).collection("respostas").stream()
 
-# Exibe tudo que foi salvo
-if st.session_state.disponibilidade:
-    st.markdown("---")
-    st.markdown("### 👥 Disponibilidades cadastradas:")
-    for pessoa, horarios in st.session_state.disponibilidade.items():
-        st.write(f"**{pessoa}**: {', '.join(sorted(horarios))}")
+        total = {}
+        for doc in respostas:
+            dados = doc.to_dict()
+            disponibilidade = dados.get("disponibilidade", {})
+            for dia, horas in disponibilidade.items():
+                for hora in horas:
+                    chave = f"{dia}-{hora}"
+                    total[chave] = total.get(chave, 0) + 1
 
-    # Verifica horários em comum
-    valores = list(st.session_state.disponibilidade.values())
-    comuns = set.intersection(*valores) if valores else set()
+        if total:
+            resultados = pd.DataFrame([
+                {"Dia": k.split("-")[0], "Hora": k.split("-")[1], "Votos": v} for k, v in total.items()
+            ])
+            resultados = resultados.sort_values(by="Votos", ascending=False)
 
-    st.markdown("### 🔍 Horários em comum entre todos:")
-    if comuns:
-        for horario in sorted(comuns):
-            st.markdown(f"- ✅ **{horario.capitalize()}**")
-    else:
-        st.warning("⚠️ Ainda não há horário em comum entre todos!")
+            st.subheader("Resultados por popularidade:")
+            st.dataframe(resultados.reset_index(drop=True))
 
-# Resetar dados
-if st.button("🔄 Limpar tudo"):
-    st.session_state.disponibilidade = {}
-    st.experimental_rerun()
+            melhor = resultados.iloc[0]
+            st.success(f"🎯 Melhor horário para todos: **{melhor['Dia']} às {melhor['Hora']}** com {melhor['Votos']} voto(s)!")
+        else:
+            st.info("Nenhuma resposta encontrada para esse código ainda.")
