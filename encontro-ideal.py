@@ -1,51 +1,61 @@
 import streamlit as st
 
 st.set_page_config(page_title="Encontro Ideal", page_icon="🤝", layout="centered")
-
 st.title("🤝 Encontro Ideal - Ache o melhor horário em família!")
+st.markdown("Marque os dias e horários que você está disponível:")
 
-st.markdown("Cadastrem os dias e horários em que **cada pessoa está disponível**.")
-st.markdown("Formato sugerido: `segunda-19h`, `domingo-10h`")
+dias_semana = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
+horarios_dia = ["10h", "14h", "16h", "18h", "19h", "20h"]
 
-# Inicializa o estado da sessão
+# Inicializa estado
 if "disponibilidade" not in st.session_state:
     st.session_state.disponibilidade = {}
 
-# Formulário para entrada de dados
-with st.form("formulario_disponibilidade"):
-    nome = st.text_input("👤 Nome")
-    horarios = st.text_area("📅 Dias e horários disponíveis (um por linha)", height=150)
-    enviado = st.form_submit_button("Salvar Disponibilidade")
+# Nome da pessoa
+nome = st.text_input("👤 Seu nome:")
 
-    if enviado:
-        if nome and horarios:
-            dias_horas = set(h.strip().lower() for h in horarios.splitlines() if h.strip())
-            st.session_state.disponibilidade[nome] = dias_horas
-            st.success(f"Disponibilidade de {nome} salva com sucesso!")
-        else:
-            st.error("Por favor, preencha o nome e os horários.")
+# Grade de horários
+st.markdown("### 📅 Selecione seus horários disponíveis:")
 
-# Exibe dados inseridos
+marcados = []
+
+for dia in dias_semana:
+    st.markdown(f"**{dia.capitalize()}**")
+    cols = st.columns(len(horarios_dia))
+    for i, hora in enumerate(horarios_dia):
+        checked = cols[i].checkbox(hora, key=f"{nome}_{dia}_{hora}")
+        if checked:
+            marcados.append(f"{dia}-{hora}")
+
+# Botão para salvar
+if st.button("💾 Salvar minha disponibilidade"):
+    if nome.strip() == "":
+        st.error("Por favor, insira seu nome antes de salvar.")
+    elif not marcados:
+        st.warning("Você não marcou nenhum horário!")
+    else:
+        st.session_state.disponibilidade[nome.strip()] = set(marcados)
+        st.success("Disponibilidade salva com sucesso! ✅")
+
+# Exibe tudo que foi salvo
 if st.session_state.disponibilidade:
+    st.markdown("---")
     st.markdown("### 👥 Disponibilidades cadastradas:")
     for pessoa, horarios in st.session_state.disponibilidade.items():
         st.write(f"**{pessoa}**: {', '.join(sorted(horarios))}")
 
     # Verifica horários em comum
-    st.markdown("### 🔍 Horários em comum:")
     valores = list(st.session_state.disponibilidade.values())
     comuns = set.intersection(*valores) if valores else set()
 
+    st.markdown("### 🔍 Horários em comum entre todos:")
     if comuns:
-        st.success("Todo mundo pode nos seguintes horários:")
         for horario in sorted(comuns):
             st.markdown(f"- ✅ **{horario.capitalize()}**")
     else:
-        st.warning("Infelizmente, ainda **não há horário em comum** entre todos.")
-else:
-    st.info("Adicione pelo menos uma pessoa para começar!")
+        st.warning("⚠️ Ainda não há horário em comum entre todos!")
 
-# Botão de reinício
-if st.button("🔄 Limpar tudo e começar de novo"):
+# Resetar dados
+if st.button("🔄 Limpar tudo"):
     st.session_state.disponibilidade = {}
     st.experimental_rerun()
