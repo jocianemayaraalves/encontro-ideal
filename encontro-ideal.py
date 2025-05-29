@@ -1,82 +1,113 @@
 import streamlit as st
-import json
 import firebase_admin
 from firebase_admin import credentials, firestore
-from datetime import datetime
 import pandas as pd
+import random
+import string
 
-# Inicializar Firebase com credenciais do Streamlit Secrets
-firebase_cred_dict = json.loads(st.secrets["FIREBASE_CREDENTIALS"])
+# Inicializar Firebase Admin
 if not firebase_admin._apps:
-    cred = credentials.Certificate(firebase_cred_dict)
+    cred = credentials.Certificate(st.secrets["FIREBASE_CREDENTIALS"])
     firebase_admin.initialize_app(cred)
-
 db = firestore.client()
 
-st.set_page_config(page_title="Encontro em Família", layout="centered")
-st.title("☕ Agenda do Encontro em Família")
+def gerar_codigo_familia(tamanho=6):
+    return 'FAM' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=tamanho))
 
-with st.form("formulario"):
-    nome = st.text_input("Seu nome")
-    codigo_familia = st.text_input("Código da família")
+st.title("Encontro em Família")
 
-    st.markdown("**Escolha os dias e horários que você está disponível nesta semana:**")
-    dias = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
-    horarios = ["08h", "10h", "14h", "16h", "18h", "20h"]
+# Seção para criar código da família
+st.header("Criar um código de família")
+nome_familia = st.text_input("Nome da sua família (ex: Família Silva)")
 
-    disponibilidade = {}
-    for dia in dias:
-        colunas = st.columns(len(horarios))
-        disponibilidade[dia] = []
-        for i, hora in enumerate(horarios):
-            checked = colunas[i].checkbox(f"{hora}", key=f"{dia}-{hora}")
-            if checked:
-                disponibilidade[dia].append(hora)
+if st.button("Gerar código de família"):
+    if nome_familia.strip() == "":
+        st.error("Por favor, informe o nome da família.")
+    else:
+        # Gera código e verifica duplicidade
+        while True:
+            novo_codigo = gerar_codigo_familia()
+            doc = db.collection("familias").document(novo_codigo).get()
+            if not doc.exists:
+                break
+        # Salva no Firebase
+        db.collection("familias").document(novo_codigo).set({"nome_familia": nome_familia})
+        st.success(f"Código gerado para {nome_familia}: **{novo_codigo}**")
+        st.info("Compartilhe esse código com sua família para que todos possam registrar a disponibilidade.")
 
-    submitted = st.form_submit_button("Salvar minha disponibilidade")
+# Mostrar códigos existentes
+st.header("Códigos de famílias já criados")
+familias_docs = db.collection("familias").stream()
+familias = [(doc.id, doc.to_dict().get("nome_familia", "")) for doc in familias_docs]
 
-    if submitted:
-        if not nome or not codigo_familia:
-            st.warning("Por favor, preencha seu nome e o código da família.")
-        else:
-            doc_ref = db.collection("familias").document(codigo_familia).collection("respostas").document(nome)
-            doc_ref.set({
-                "nome": nome,
-                "codigo_familia": codigo_familia,
-                "disponibilidade": disponibilidade,
-                "timestamp": datetime.now()
-            })
-            st.success("Disponibilidade salva com sucesso! 🎉")
+if familias:
+    df_familias = pd.DataFrame(familias, columns=["Código", "Nome da Família"])
+    st.table(df_familias)
+else:
+    st.write("Nenhum código de família cadastrado ainda.")
 
 st.markdown("---")
-st.header("🔍 Melhor horário para a família")
-codigo_busca = st.text_input("Digite o código da família para ver o melhor horário")
 
-if st.button("Calcular melhor horário"):
-    if not codigo_busca:
-        st.warning("Digite um código de família.")
-    else:
-        respostas = db.collection("familias").document(codigo_busca).collection("respostas").stream()
+# Formulário para registrar disponibilidade
+st.header("Registrar disponibilidade")
 
-        total = {}
-        for doc in respostas:
-            dados = doc.to_dict()
-            disponibilidade = dados.get("disponibilidade", {})
-            for dia, horas in disponibilidade.items():
-                for hora in horas:
-                    chave = f"{dia}-{hora}"
-                    total[chave] = total.get(chave, 0) + 1
+codigo_familia = st.text_input("Digite o código da família")
+nome = st.text_input("Seu nome")
 
-        if total:
-            resultados = pd.DataFrame([
-                {"Dia": k.split("-")[0], "Hora": k.split("-")[1], "Votos": v} for k, v in total.items()
-            ])
-            resultados = resultados.sort_values(by="Votos", ascending=False)
+dias_semana = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+horarios = ["Manhã", "Tarde", "Noite"]
 
-            st.subheader("Resultados por popularidade:")
-            st.dataframe(resultados.reset_index(drop=True))
+if codigo_familia and nome:
+    st.write("Selecione os dias e horários que você está disponível:")
 
-            melhor = resultados.iloc[0]
-            st.success(f"🎯 Melhor horário para todos: **{melhor['Dia']} às {melhor['Hora']}** com {melhor['Votos']} voto(s)!")
+    disponibilidade = {}
+    for dia in dias_semana:
+        disponibilidade[dia] = []
+        cols = st.columns(len(horarios))
+        for i, horario in enumerate(horarios):
+            with cols[i]:
+                check = st.checkbox(f"{dia} - {horario}", key=f"{dia}_{horario}_{nome}")
+                if check:
+                    disponibilidade[dia].append(horario)
+
+    if st.button("Salvar disponibilidade"):
+        # Verificar se código de família existe
+        doc = db.collection("familias").document(codigo_familia).get()
+        if not doc.exists:
+            st.error("Código de família inválido. Por favor, verifique e tente novamente.")
         else:
-            st.info("Nenhuma resposta encontrada para esse código ainda.")
+            data = {
+                "nome": nome,
+                "disponibilidade": disponibilidade
+            }
+            db.collection("familias").document(codigo_familia).collection("respostas").document(nome).set(data)
+            st.success("Disponibilidade salva com sucesso!")
+
+    # Mostrar melhor dia e horário para a família (se disponível)
+    respostas = db.collection("familias").document(codigo_familia).collection("respostas").stream()
+    todos = [r.to_dict() for r in respostas]
+
+    if todos:
+        # Contar a disponibilidade geral
+        contagem = {dia: {h: 0 for h in horarios} for dia in dias_semana}
+        for r in todos:
+            disp = r.get("disponibilidade", {})
+            for dia in disp:
+                for h in disp[dia]:
+                    contagem[dia][h] += 1
+
+        # Encontrar o máximo
+        max_val = 0
+        melhor_dia = None
+        melhor_horario = None
+        for dia in contagem:
+            for h in contagem[dia]:
+                if contagem[dia][h] > max_val:
+                    max_val = contagem[dia][h]
+                    melhor_dia = dia
+                    melhor_horario = h
+
+        st.write(f"**Melhor dia e horário para se encontrar:** {melhor_dia} - {melhor_horario} (Disponibilidade de {max_val} pessoa(s))")
+
+else:
+    st.info("Por favor, informe o código da família e seu nome para continuar.")
