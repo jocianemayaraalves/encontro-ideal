@@ -4,6 +4,7 @@ from firebase_admin import credentials, firestore
 import pandas as pd
 import random
 import string
+import pyperclip
 
 # Inicializar Firebase Admin
 if not firebase_admin._apps:
@@ -14,11 +15,14 @@ db = firestore.client()
 def gerar_codigo_familia(tamanho=6):
     return 'FAM' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=tamanho))
 
-st.title("Encontro em Família")
+st.set_page_config(page_title="Encontro Ideal da Família", layout="wide")
 
-# Seção para criar código da família
-st.header("Criar um código de família")
-nome_familia = st.text_input("Nome da sua família (ex: Família Silva)")
+st.title("Encontro Ideal da Família 🏡")
+
+# --- Gerar código da família ---
+st.header("1. Criar código da família")
+
+nome_familia = st.text_input("Digite o nome da sua família (ex: Família Silva)")
 
 if st.button("Gerar código de família"):
     if nome_familia.strip() == "":
@@ -32,24 +36,35 @@ if st.button("Gerar código de família"):
                 break
         # Salva no Firebase
         db.collection("familias").document(novo_codigo).set({"nome_familia": nome_familia})
-        st.success(f"Código gerado para {nome_familia}: **{novo_codigo}**")
+        st.success(f"Código gerado para **{nome_familia}**: **{novo_codigo}**")
         st.info("Compartilhe esse código com sua família para que todos possam registrar a disponibilidade.")
+        # Botão para copiar código
+        if st.button("Copiar código para a área de transferência"):
+            try:
+                import pyperclip
+                pyperclip.copy(novo_codigo)
+                st.success("Código copiado! Agora é só colar e compartilhar.")
+            except Exception:
+                st.warning("Não foi possível copiar automaticamente. Por favor, copie manualmente o código.")
 
-# Mostrar códigos existentes
-st.header("Códigos de famílias já criados")
+st.markdown("---")
+
+# --- Mostrar códigos de famílias já criados ---
+st.header("2. Códigos de famílias já criados")
+
 familias_docs = db.collection("familias").stream()
 familias = [(doc.id, doc.to_dict().get("nome_familia", "")) for doc in familias_docs]
 
 if familias:
-    df_familias = pd.DataFrame(familias, columns=["Código", "Nome da Família"])
+    df_familias = pd.DataFrame(familias, columns=["Código da Família", "Nome da Família"])
     st.table(df_familias)
 else:
     st.write("Nenhum código de família cadastrado ainda.")
 
 st.markdown("---")
 
-# Formulário para registrar disponibilidade
-st.header("Registrar disponibilidade")
+# --- Registrar disponibilidade ---
+st.header("3. Registrar disponibilidade")
 
 codigo_familia = st.text_input("Digite o código da família")
 nome = st.text_input("Seu nome")
@@ -107,7 +122,9 @@ if codigo_familia and nome:
                     melhor_dia = dia
                     melhor_horario = h
 
-        st.write(f"**Melhor dia e horário para se encontrar:** {melhor_dia} - {melhor_horario} (Disponibilidade de {max_val} pessoa(s))")
+        st.markdown("---")
+        st.subheader("Melhor dia e horário para o encontro:")
+        st.success(f"**{melhor_dia} - {melhor_horario}** (Disponibilidade de {max_val} pessoa(s))")
 
 else:
     st.info("Por favor, informe o código da família e seu nome para continuar.")
