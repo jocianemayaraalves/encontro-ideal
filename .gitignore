@@ -1,9 +1,20 @@
-# Ignorar credenciais do Firebase
-firebase_admin_sdk.json
+# Arquivos de credenciais Firebase e Streamlit Secrets
+firebase_key.json
+.streamlit/secrets.toml
 
-# Ignorar arquivos pycache
+# Ambientes virtuais
+venv/
+.env
+
+# Arquivos temporários
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Ignorar arquivos temporários do sistema
+# Logs
+*.log
+
+# Arquivos do sistema (Windows, macOS)
 .DS_Store
+Thumbs.db
