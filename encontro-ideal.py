@@ -4,6 +4,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import datetime
 from datetime import timedelta, time, date
+import uuid
 
 def init_firebase():
     if not firebase_admin._apps:
@@ -26,8 +27,6 @@ def init_firebase():
 db = init_firebase()
 
 def intervalos_sobrepostos(intervalos1, intervalos2):
-    # Recebe duas listas de intervalos (start, end) como strings "HH:MM"
-    # Retorna a lista de intervalos de sobreposição
     sobrepostos = []
     for s1, e1 in intervalos1:
         s1_dt = datetime.datetime.strptime(s1, "%H:%M").time()
@@ -37,7 +36,7 @@ def intervalos_sobrepostos(intervalos1, intervalos2):
             e2_dt = datetime.datetime.strptime(e2, "%H:%M").time()
             latest_start = max(s1_dt, s2_dt)
             earliest_end = min(e1_dt, e2_dt)
-            if latest_start < earliest_end:  # há sobreposição
+            if latest_start < earliest_end:
                 sobrepostos.append((
                     latest_start.strftime("%H:%M"),
                     earliest_end.strftime("%H:%M")
@@ -67,96 +66,108 @@ def input_intervalos_por_dia(user_id, day):
         idx += 1
     return intervalos
 
-# ========================== INÍCIO DO MENU "Entrar na família" ===============================
+def limpar_familias_expiradas():
+    now = datetime.datetime.utcnow()
+    familias = db.collection("familias").stream()
+    for fam in familias:
+        data_exp = fam.get("data_expiracao")
+        if isinstance(data_exp, datetime.datetime) and data_exp < now:
+            # Deleta membros
+            membros = db.collection("familias").document(fam.id).collection("membros").stream()
+            for membro in membros:
+                membro.reference.delete()
+            # Deleta família
+            fam.reference.delete()
+            st.write(f"Família '{fam.id}' expirada e removida.")
 
-family_code = st.text_input("Digite o código da família:")
-user_name = st.text_input("Seu nome ou apelido:")
+limpar_familias_expiradas()
 
-if family_code and user_name:
-    fam_doc = db.collection("familias").document(family_code).get()
-    if not fam_doc.exists:
-        st.error("Código da família não encontrado.")
-    else:
-        familia = fam_doc.to_dict()
-        if familia.get("data_expiracao") < datetime.datetime.utcnow():
-            st.error("Essa família expirou. Crie uma nova família.")
+st.title("Encontro Ideal - Disponibilidade Familiar")
+
+menu = st.sidebar.selectbox("Menu", ["Criar família", "Entrar na família"])
+
+if menu == "Criar família":
+    st.subheader("Criar uma nova família")
+    nome_familia = st.text_input("Nome da família (Ex: Família Souza, Amigos, Casal João e Maria)")
+    num_membros = st.number_input("Número máximo de pessoas que terão acesso", min_value=1, max_value=50, value=3)
+    if st.button("Criar família"):
+        codigo = str(uuid.uuid4()).split("-")[0][:6].upper()
+        data_expiracao = datetime.datetime.utcnow() + timedelta(days=30)
+        db.collection("familias").document(codigo).set({
+            "nome": nome_familia,
+            "num_membros": num_membros,
+            "data_criacao": datetime.datetime.utcnow(),
+            "data_expiracao": data_expiracao,
+        })
+        st.success(f"Família criada com sucesso! Código da família: **{codigo}**. Salve esse código para compartilhar com seus membros.")
+
+elif menu == "Entrar na família":
+    family_code = st.text_input("Digite o código da família:")
+    user_name = st.text_input("Seu nome ou apelido:")
+
+    if family_code and user_name:
+        fam_doc = db.collection("familias").document(family_code).get()
+        if not fam_doc.exists:
+            st.error("Código da família não encontrado.")
         else:
-            user_id = user_name.replace(" ", "_").lower()
-            membro_ref = db.collection("familias").document(family_code).collection("membros").document(user_id)
-            
-            # Verificar limite de membros
-            membros_cadastrados = list(db.collection("familias").document(family_code).collection("membros").stream())
-            limite = familia.get("num_membros", 1)
-
-            if user_id not in [m.id for m in membros_cadastrados] and len(membros_cadastrados) >= limite:
-                st.error("Limite de membros cadastrados atingido para essa família.")
+            familia = fam_doc.to_dict()
+            if familia.get("data_expiracao") < datetime.datetime.utcnow():
+                st.error("Essa família expirou. Crie uma nova família.")
             else:
-                days = [date.today() + timedelta(days=i) for i in range(30)]
+                user_id = user_name.replace(" ", "_").lower()
+                membro_ref = db.collection("familias").document(family_code).collection("membros").document(user_id)
+                
+                membros_cadastrados = list(db.collection("familias").document(family_code).collection("membros").stream())
+                limite = familia.get("num_membros", 1)
 
-                st.write(f"Marque sua disponibilidade para os próximos 30 dias, {user_name}:")
-
-                disponibilidade = {}
-
-                for day in days:
-                    intervalos = input_intervalos_por_dia(user_id, day)
-                    disponibilidade[str(day)] = intervalos
-
-                if st.button("Salvar minha disponibilidade"):
-                    membro_ref.set({"disponibilidade": disponibilidade})
-                    st.success("Disponibilidade salva com sucesso!")
-
-                st.write("---")
-                st.write(f"Análise de disponibilidade da família '{familia.get('nome', family_code)}':")
-
-                membros = db.collection("familias").document(family_code).collection("membros").stream()
-                membros_list = list(membros)
-                total_membros = len(membros_list)
-
-                if total_membros == 0:
-                    st.info("Nenhum membro da família registrou disponibilidade ainda.")
+                if user_id not in [m.id for m in membros_cadastrados] and len(membros_cadastrados) >= limite:
+                    st.error("Limite de membros cadastrados atingido para essa família.")
                 else:
-                    # Para cada dia, vamos calcular os intervalos que TODOS os membros têm em comum:
-                    disponibilidade_geral = {}
-                    for membro in membros_list:
-                        dados = membro.to_dict()
-                        disp = dados.get("disponibilidade", {})
-                        for dia, intervalos in disp.items():
-                            if dia not in disponibilidade_geral:
-                                disponibilidade_geral[dia] = intervalos
-                            else:
-                                disponibilidade_geral[dia] = intervalos_sobrepostos(disponibilidade_geral[dia], intervalos)
+                    days = [date.today() + timedelta(days=i) for i in range(30)]
 
-                    horarios_comuns = []
-                    for dia, intervalos in disponibilidade_geral.items():
-                        for intervalo in intervalos:
-                            horarios_comuns.append((dia, f"{intervalo[0]} até {intervalo[1]}"))
+                    st.write(f"Marque sua disponibilidade para os próximos 30 dias, {user_name}:")
 
-                    if horarios_comuns:
-                        st.success(f"Horários que todos podem comparecer ({total_membros} membros):")
-                        df = pd.DataFrame(horarios_comuns, columns=["Data", "Intervalo"])
-                        df["Data"] = pd.to_datetime(df["Data"]).dt.strftime("%A, %d/%m/%Y")
-                        st.dataframe(df)
+                    disponibilidade = {}
+
+                    for day in days:
+                        intervalos = input_intervalos_por_dia(user_id, day)
+                        disponibilidade[str(day)] = intervalos
+
+                    if st.button("Salvar minha disponibilidade"):
+                        membro_ref.set({"disponibilidade": disponibilidade})
+                        st.success("Disponibilidade salva com sucesso!")
+
+                    st.write("---")
+                    st.write(f"Análise de disponibilidade da família '{familia.get('nome', family_code)}':")
+
+                    membros = db.collection("familias").document(family_code).collection("membros").stream()
+                    membros_list = list(membros)
+                    total_membros = len(membros_list)
+
+                    if total_membros == 0:
+                        st.info("Nenhum membro da família registrou disponibilidade ainda.")
                     else:
-                        st.warning("Não há nenhum intervalo em que todos possam comparecer simultaneamente nos próximos 30 dias.")
+                        disponibilidade_geral = {}
+                        for membro in membros_list:
+                            dados = membro.to_dict()
+                            disp = dados.get("disponibilidade", {})
+                            for dia, intervalos in disp.items():
+                                if dia not in disponibilidade_geral:
+                                    disponibilidade_geral[dia] = intervalos
+                                else:
+                                    disponibilidade_geral[dia] = intervalos_sobrepostos(disponibilidade_geral[dia], intervalos)
 
-                # NOVO: Mostrar disponibilidade individual de cada membro
-                st.write("---")
-                st.write("Disponibilidade individual dos membros:")
+                        horarios_comuns = []
+                        for dia, intervalos in disponibilidade_geral.items():
+                            for intervalo in intervalos:
+                                horarios_comuns.append((dia, f"{intervalo[0]} até {intervalo[1]}"))
 
-                for membro in membros_list:
-                    nome_membro = membro.id.replace("_", " ").title()
-                    dados = membro.to_dict()
-                    disp = dados.get("disponibilidade", {})
-                    st.write(f"**{nome_membro}**:")
-                    if not disp:
-                        st.write("_Nenhuma disponibilidade registrada._")
-                        continue
-                    for dia in sorted(disp.keys()):
-                        intervalos = disp[dia]
-                        if intervalos:
-                            intervalo_str = ", ".join([f"{inicio} até {fim}" for inicio, fim in intervalos])
-                            st.write(f"- {pd.to_datetime(dia).strftime('%A, %d/%m/%Y')}: {intervalo_str}")
+                        if horarios_comuns:
+                            st.success(f"Horários que todos podem comparecer ({total_membros} membros):")
+                            df = pd.DataFrame(horarios_comuns, columns=["Data", "Intervalo"])
+                            df["Data"] = pd.to_datetime(df["Data"]).dt.strftime("%A, %d/%m/%Y")
+                            st.dataframe(df)
                         else:
-                            st.write(f"- {pd.to_datetime(dia).strftime('%A, %d/%m/%Y')}: _Sem intervalos_")
-else:
-    st.info("Digite o código da família e seu nome para começar.")
+                            st.warning("Não há nenhum intervalo em que todos possam comparecer simultaneamente nos próximos 30 dias.")
+    else:
+        st.info("Digite o código da família e seu nome para começar.")
