@@ -26,7 +26,48 @@ def init_firebase():
 
 db = init_firebase()
 
+def converter_para_datetime(valor):
+    """
+    Converte valor para datetime.datetime se possível.
+    Aceita Timestamp do Firestore, string ISO, ou datetime.
+    Retorna None se não conseguir converter.
+    """
+    if valor is None:
+        return None
+    # Caso seja Timestamp do Firestore
+    if hasattr(valor, "to_datetime"):
+        return valor.to_datetime()
+    # Caso já seja datetime
+    if isinstance(valor, datetime.datetime):
+        return valor
+    # Caso seja string ISO
+    if isinstance(valor, str):
+        try:
+            return datetime.datetime.fromisoformat(valor)
+        except Exception:
+            return None
+    return None
+
+def limpar_familias_expiradas():
+    now = datetime.datetime.utcnow()
+    familias = db.collection("familias").stream()
+    for fam in familias:
+        data_exp = fam.get("data_expiracao")
+        data_exp = converter_para_datetime(data_exp)
+        if data_exp and data_exp < now:
+            # Deleta membros
+            membros = db.collection("familias").document(fam.id).collection("membros").stream()
+            for membro in membros:
+                membro.reference.delete()
+            # Deleta família
+            fam.reference.delete()
+            st.write(f"Família '{fam.id}' expirada e removida.")
+
+limpar_familias_expiradas()
+
 def intervalos_sobrepostos(intervalos1, intervalos2):
+    # Recebe duas listas de intervalos (start, end) como strings "HH:MM"
+    # Retorna a lista de intervalos de sobreposição
     sobrepostos = []
     for s1, e1 in intervalos1:
         s1_dt = datetime.datetime.strptime(s1, "%H:%M").time()
@@ -36,7 +77,7 @@ def intervalos_sobrepostos(intervalos1, intervalos2):
             e2_dt = datetime.datetime.strptime(e2, "%H:%M").time()
             latest_start = max(s1_dt, s2_dt)
             earliest_end = min(e1_dt, e2_dt)
-            if latest_start < earliest_end:
+            if latest_start < earliest_end:  # há sobreposição
                 sobrepostos.append((
                     latest_start.strftime("%H:%M"),
                     earliest_end.strftime("%H:%M")
@@ -66,22 +107,6 @@ def input_intervalos_por_dia(user_id, day):
         idx += 1
     return intervalos
 
-def limpar_familias_expiradas():
-    now = datetime.datetime.utcnow()
-    familias = db.collection("familias").stream()
-    for fam in familias:
-        data_exp = fam.get("data_expiracao")
-        if isinstance(data_exp, datetime.datetime) and data_exp < now:
-            # Deleta membros
-            membros = db.collection("familias").document(fam.id).collection("membros").stream()
-            for membro in membros:
-                membro.reference.delete()
-            # Deleta família
-            fam.reference.delete()
-            st.write(f"Família '{fam.id}' expirada e removida.")
-
-limpar_familias_expiradas()
-
 st.title("Encontro Ideal - Disponibilidade Familiar")
 
 menu = st.sidebar.selectbox("Menu", ["Criar família", "Entrar na família"])
@@ -91,8 +116,10 @@ if menu == "Criar família":
     nome_familia = st.text_input("Nome da família (Ex: Família Souza, Amigos, Casal João e Maria)")
     num_membros = st.number_input("Número máximo de pessoas que terão acesso", min_value=1, max_value=50, value=3)
     if st.button("Criar família"):
+        # Gerar código único de 6 caracteres
         codigo = str(uuid.uuid4()).split("-")[0][:6].upper()
         data_expiracao = datetime.datetime.utcnow() + timedelta(days=30)
+        # Salvar no Firestore
         db.collection("familias").document(codigo).set({
             "nome": nome_familia,
             "num_membros": num_membros,
@@ -111,12 +138,14 @@ elif menu == "Entrar na família":
             st.error("Código da família não encontrado.")
         else:
             familia = fam_doc.to_dict()
-            if familia.get("data_expiracao") < datetime.datetime.utcnow():
+            data_exp = converter_para_datetime(familia.get("data_expiracao"))
+            if data_exp and data_exp < datetime.datetime.utcnow():
                 st.error("Essa família expirou. Crie uma nova família.")
             else:
                 user_id = user_name.replace(" ", "_").lower()
                 membro_ref = db.collection("familias").document(family_code).collection("membros").document(user_id)
                 
+                # Verificar limite de membros
                 membros_cadastrados = list(db.collection("familias").document(family_code).collection("membros").stream())
                 limite = familia.get("num_membros", 1)
 
@@ -147,6 +176,7 @@ elif menu == "Entrar na família":
                     if total_membros == 0:
                         st.info("Nenhum membro da família registrou disponibilidade ainda.")
                     else:
+                        # Para cada dia, vamos calcular os intervalos que TODOS os membros têm em comum:
                         disponibilidade_geral = {}
                         for membro in membros_list:
                             dados = membro.to_dict()
