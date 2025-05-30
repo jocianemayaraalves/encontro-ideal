@@ -98,12 +98,21 @@ elif menu == "Entrar na família":
         else:
             familia = fam_doc.to_dict()
             data_exp = familia.get("data_expiracao")
-            if data_exp is not None:
-                if hasattr(data_exp, "to_datetime"):
-                    data_exp = data_exp.to_datetime()
-            else:
+
+            if data_exp is None:
                 st.error("Data de expiração inválida.")
                 st.stop()
+
+            if hasattr(data_exp, "to_datetime"):
+                data_exp = data_exp.to_datetime()
+            elif isinstance(data_exp, datetime.datetime):
+                pass  # já está no formato datetime
+            else:
+                try:
+                    data_exp = datetime.datetime.fromisoformat(str(data_exp))
+                except Exception:
+                    st.error("Formato da data de expiração não suportado.")
+                    st.stop()
 
             if data_exp < datetime.datetime.utcnow():
                 st.error("Essa família expirou. Crie uma nova família.")
@@ -111,7 +120,6 @@ elif menu == "Entrar na família":
                 user_id = user_name.replace(" ", "_").lower()
                 membro_ref = db.collection("familias").document(family_code).collection("membros").document(user_id)
 
-                # Verificar limite de membros
                 membros_cadastrados = list(db.collection("familias").document(family_code).collection("membros").stream())
                 limite = familia.get("num_membros", 1)
 
