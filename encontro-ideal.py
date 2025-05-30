@@ -31,7 +31,8 @@ def limpar_familias_expiradas():
     familias = db.collection("familias").stream()
     for fam in familias:
         data_exp = fam.get("data_expiracao")
-        if data_exp and data_exp < now:
+        # Verifica se é do tipo datetime antes de comparar
+        if isinstance(data_exp, datetime.datetime) and data_exp < now:
             # Deleta membros
             membros = db.collection("familias").document(fam.id).collection("membros").stream()
             for membro in membros:
